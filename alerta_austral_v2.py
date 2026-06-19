@@ -295,7 +295,7 @@ def modal_nueva_alerta(lat, lon):
             st.rerun()
     with col2:
         if st.button("🚨 Guardar Alerta", type="primary", use_container_width=True):
-            hora_reporte = datetime.now().strftime("%H:%M (%d/%m)")
+            hora_reporte = datetime.now().strftime("%H-4:%M (%d/%m)")
             nueva_fila = [calle_final, str(lat), str(lon), descripcion_incidente, "Inundado", hora_reporte]
             try:
                 gc = init_gspread()
