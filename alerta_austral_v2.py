@@ -11,7 +11,7 @@ import json
 import math
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="🗺️ Alerta Austral 📍", page_icon="🗺️", layout="centered")
+st.set_page_config(page_title="AquaRuta", page_icon="🗺️", layout="centered")
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1eUVLkgfuO1yBqECtXsxYbOf0YYBnGhFykljGokZVK4U/edit"
 
