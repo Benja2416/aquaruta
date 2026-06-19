@@ -13,7 +13,7 @@ import math
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="🗺️ Alerta Austral 📍", page_icon="🗺️", layout="centered")
 
-SHEET_URL = "https://docs.google.com/spreadsheets/d/11mPB_wV3ogbxgExGj5E7BI_L1uL3tzUxnwDh2NlHn4Q/edit"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1eUVLkgfuO1yBqECtXsxYbOf0YYBnGhFykljGokZVK4U/edit"
 
 # Radio de exclusión de zonas inundadas (en grados lat/lon ≈ 100m)
 RADIO_EXCLUSION_GRADOS = 0.0009
