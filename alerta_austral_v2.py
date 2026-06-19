@@ -411,7 +411,7 @@ div[data-testid="stDialog"] div[role="dialog"] { background-color: #222 !importa
 .alt-badge { display: inline-block; background: #dc2626; color: white !important; padding: 2px 10px; border-radius: 12px; font-size: 0.8em; font-weight: bold; margin-left: 8px; }
 .stButton button { border-radius: 8px !important; }
 </style>
-<div class="main-header">🚨 Alerta Austral 📱</div>
+<div class="main-header">AquaRuta</div>
 ''', unsafe_allow_html=True)
 
 # =====================================================================
