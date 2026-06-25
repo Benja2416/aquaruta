@@ -6,9 +6,17 @@ from geopy.geocoders import Nominatim
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
+import pytz
 import requests
 import json
 import math
+
+# --- ZONA HORARIA CHILE ---
+TZ_CHILE = pytz.timezone("America/Santiago")
+
+def ahora_chile():
+    """Retorna el datetime actual en horario de Chile (incluye cambio de horario verano/invierno)."""
+    return datetime.now(pytz.utc).astimezone(TZ_CHILE)
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="AqueRuta", page_icon="💧", layout="centered")
@@ -107,7 +115,7 @@ def actualizar_estado_db(fila_ref, nuevo_estado, nombre_pestana="sheet1"):
                     continue
             if fila_a_modificar:
                 sheet.update_cell(fila_a_modificar, 5, nuevo_estado)
-                hora_actual = datetime.now().strftime("%H:%M (%d/%m)")
+                hora_actual = ahora_chile().strftime("%H:%M (%d/%m)")
                 if len(valores_crudos[0]) >= 6 or sheet.col_count >= 6:
                     sheet.update_cell(fila_a_modificar, 6, hora_actual)
                 obtener_calles.clear()
@@ -143,10 +151,12 @@ def parsear_hora_reporte(hora_str):
             return None
         hora_parte = partes[0]          # "14:32"
         fecha_parte = partes[1]         # "25/06"
-        anio_actual = datetime.now().year
-        dt = datetime.strptime(f"{hora_parte} {fecha_parte}/{anio_actual}", "%H:%M %d/%m/%Y")
-        if dt > datetime.now() + timedelta(hours=1):
+        anio_actual = ahora_chile().year
+        dt_naive = datetime.strptime(f"{hora_parte} {fecha_parte}/{anio_actual}", "%H:%M %d/%m/%Y")
+        dt = TZ_CHILE.localize(dt_naive)
+        if dt > ahora_chile() + timedelta(hours=1):
             dt = dt.replace(year=anio_actual - 1)
+            dt = TZ_CHILE.localize(dt.replace(tzinfo=None))
         return dt
     except Exception:
         return None
@@ -156,7 +166,7 @@ def minutos_desde_reporte(hora_str):
     dt = parsear_hora_reporte(hora_str)
     if dt is None:
         return None
-    delta = datetime.now() - dt
+    delta = ahora_chile() - dt
     return delta.total_seconds() / 60
 
 def debe_ocultar_en_mapa(hora_str):
@@ -379,7 +389,7 @@ def modal_nueva_alerta(lat, lon):
             st.rerun()
     with col2:
         if st.button("Guardar Alerta", type="primary", use_container_width=True):
-            hora_reporte = datetime.now().strftime("%H:%M (%d/%m)")
+            hora_reporte = ahora_chile().strftime("%H:%M (%d/%m)")
             nueva_fila = [calle_final, str(lat), str(lon), descripcion_incidente, "Inundado", hora_reporte]
             try:
                 gc = init_gspread()
@@ -505,14 +515,14 @@ div[data-testid="stDialog"] div[role="dialog"] { background-color: #222 !importa
 # --- Limpieza automática de alertas expiradas (24h) ---
 # Se ejecuta silenciosamente en cada carga de página
 if "ultima_limpieza_bd" not in st.session_state:
-    st.session_state.ultima_limpieza_bd = datetime.now() - timedelta(minutes=10)
+    st.session_state.ultima_limpieza_bd = ahora_chile() - timedelta(minutes=10)
 
 # Ejecutar limpieza como máximo cada 5 minutos para no saturar la API
-minutos_desde_limpieza = (datetime.now() - st.session_state.ultima_limpieza_bd).total_seconds() / 60
+minutos_desde_limpieza = (ahora_chile() - st.session_state.ultima_limpieza_bd).total_seconds() / 60
 if minutos_desde_limpieza >= 5:
     eliminadas_calles = limpiar_alertas_expiradas_sheet("sheet1")
     eliminadas_paraderos = limpiar_alertas_expiradas_sheet("Hoja 2")
-    st.session_state.ultima_limpieza_bd = datetime.now()
+    st.session_state.ultima_limpieza_bd = ahora_chile()
     if eliminadas_calles + eliminadas_paraderos > 0:
         st.toast(f"Se eliminaron {eliminadas_calles + eliminadas_paraderos} alerta(s) expirada(s) de la base de datos.")
 
