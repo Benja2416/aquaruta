@@ -19,7 +19,7 @@ def ahora_chile():
     return datetime.now(pytz.utc).astimezone(TZ_CHILE)
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="AqueRuta", page_icon="💧", layout="centered")
+st.set_page_config(page_title="AquaRuta", page_icon="💧", layout="centered")
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1eUVLkgfuO1yBqECtXsxYbOf0YYBnGhFykljGokZVK4U/edit"
 
@@ -505,7 +505,7 @@ div[data-testid="stDialog"] div[role="dialog"] { background-color: #222 !importa
 .alt-badge { display: inline-block; background: #dc2626; color: white !important; padding: 2px 10px; border-radius: 12px; font-size: 0.8em; font-weight: bold; margin-left: 8px; }
 .stButton button { border-radius: 8px !important; }
 </style>
-<div class="main-header">AqueRuta</div>
+<div class="main-header">AquaRuta</div>
 ''', unsafe_allow_html=True)
 
 # =====================================================================
