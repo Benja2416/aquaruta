@@ -5,19 +5,22 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 import json
 import math
-from zoneinfo import ZoneInfo
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="AquaRuta", page_icon="🗺️", layout="centered")
+st.set_page_config(page_title="🗺️ Alerta Austral 📍", page_icon="🗺️", layout="centered")
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1eUVLkgfuO1yBqECtXsxYbOf0YYBnGhFykljGokZVK4U/edit"
 
 # Radio de exclusión de zonas inundadas (en grados lat/lon ≈ 100m)
 RADIO_EXCLUSION_GRADOS = 0.0009
+
+# --- TIEMPOS DE EXPIRACIÓN ---
+MINUTOS_OCULTAR_MAPA = 5       # Después de este tiempo se oculta del mapa
+HORAS_ELIMINAR_BD = 24         # Después de este tiempo se borra de la base de datos
 
 # --- ESTADO DE SESIÓN ---
 defaults = {
@@ -121,6 +124,86 @@ def actualizar_estado_db(fila_ref, nuevo_estado, nombre_pestana="sheet1"):
                 st.error("No se encontró el registro físico en las celdas.")
     except Exception as e:
         st.error(f"Error: {e}")
+
+# =====================================================================
+# MÓDULO DE EXPIRACIÓN DE ALERTAS
+# =====================================================================
+
+def parsear_hora_reporte(hora_str):
+    """
+    Convierte el string de hora guardado (ej: '14:32 (25/06)') a un objeto datetime.
+    Retorna None si no se puede parsear.
+    """
+    if not hora_str or str(hora_str).strip() in ["", "---", "Sin Registro"]:
+        return None
+    try:
+        hora_str = str(hora_str).strip()
+        partes = hora_str.replace("(", "").replace(")", "").split()
+        if len(partes) < 2:
+            return None
+        hora_parte = partes[0]          # "14:32"
+        fecha_parte = partes[1]         # "25/06"
+        anio_actual = datetime.now().year
+        dt = datetime.strptime(f"{hora_parte} {fecha_parte}/{anio_actual}", "%H:%M %d/%m/%Y")
+        if dt > datetime.now() + timedelta(hours=1):
+            dt = dt.replace(year=anio_actual - 1)
+        return dt
+    except Exception:
+        return None
+
+def minutos_desde_reporte(hora_str):
+    """Retorna los minutos transcurridos desde el reporte, o None si no se puede calcular."""
+    dt = parsear_hora_reporte(hora_str)
+    if dt is None:
+        return None
+    delta = datetime.now() - dt
+    return delta.total_seconds() / 60
+
+def debe_ocultar_en_mapa(hora_str):
+    """True si han pasado más de MINUTOS_OCULTAR_MAPA desde el reporte."""
+    minutos = minutos_desde_reporte(hora_str)
+    if minutos is None:
+        return False
+    return minutos >= MINUTOS_OCULTAR_MAPA
+
+def debe_eliminar_de_bd(hora_str):
+    """True si han pasado más de HORAS_ELIMINAR_BD desde el reporte."""
+    minutos = minutos_desde_reporte(hora_str)
+    if minutos is None:
+        return False
+    return minutos >= HORAS_ELIMINAR_BD * 60
+
+def limpiar_alertas_expiradas_sheet(nombre_pestana="sheet1"):
+    """
+    Recorre la hoja buscando filas con estado inundado que superen
+    las HORAS_ELIMINAR_BD horas y las elimina de la base de datos.
+    Retorna el número de filas eliminadas.
+    """
+    try:
+        gc = init_gspread()
+        doc = gc.open_by_url(SHEET_URL)
+        sheet = doc.sheet1 if nombre_pestana == "sheet1" else doc.worksheet(nombre_pestana)
+        valores = sheet.get_all_values()
+        if len(valores) <= 1:
+            return 0
+        estados_a_limpiar = {"inundado", "paradero inundado", "paradero mal estado"}
+        filas_a_eliminar = []
+        for i, fila in enumerate(valores[1:], start=2):
+            try:
+                estado = str(fila[4]).strip().lower() if len(fila) > 4 else ""
+                hora = str(fila[5]).strip() if len(fila) > 5 else ""
+                if estado in estados_a_limpiar and debe_eliminar_de_bd(hora):
+                    filas_a_eliminar.append(i)
+            except Exception:
+                continue
+        for fila_idx in sorted(filas_a_eliminar, reverse=True):
+            sheet.delete_rows(fila_idx)
+        if filas_a_eliminar:
+            obtener_calles.clear()
+            obtener_paraderos.clear()
+        return len(filas_a_eliminar)
+    except Exception:
+        return 0
 
 # =====================================================================
 # MÓDULO DE ENRUTAMIENTO CON OSRM
@@ -296,7 +379,7 @@ def modal_nueva_alerta(lat, lon):
             st.rerun()
     with col2:
         if st.button("🚨 Guardar Alerta", type="primary", use_container_width=True):
-            hora_reporte = datetime.now(tz=ZoneInfo("America/Santiago")).strftime("%H:%M (%d/%m)")
+            hora_reporte = datetime.now().strftime("%H:%M (%d/%m)")
             nueva_fila = [calle_final, str(lat), str(lon), descripcion_incidente, "Inundado", hora_reporte]
             try:
                 gc = init_gspread()
@@ -412,20 +495,49 @@ div[data-testid="stDialog"] div[role="dialog"] { background-color: #222 !importa
 .alt-badge { display: inline-block; background: #dc2626; color: white !important; padding: 2px 10px; border-radius: 12px; font-size: 0.8em; font-weight: bold; margin-left: 8px; }
 .stButton button { border-radius: 8px !important; }
 </style>
-<div class="main-header">AquaRuta</div>
+<div class="main-header">🚨 Alerta Austral 📱</div>
 ''', unsafe_allow_html=True)
 
 # =====================================================================
 # CARGA DE DATOS
 # =====================================================================
 
+# --- Limpieza automática de alertas expiradas (24h) ---
+# Se ejecuta silenciosamente en cada carga de página
+if "ultima_limpieza_bd" not in st.session_state:
+    st.session_state.ultima_limpieza_bd = datetime.now() - timedelta(minutes=10)
+
+# Ejecutar limpieza como máximo cada 5 minutos para no saturar la API
+minutos_desde_limpieza = (datetime.now() - st.session_state.ultima_limpieza_bd).total_seconds() / 60
+if minutos_desde_limpieza >= 5:
+    eliminadas_calles = limpiar_alertas_expiradas_sheet("sheet1")
+    eliminadas_paraderos = limpiar_alertas_expiradas_sheet("Hoja 2")
+    st.session_state.ultima_limpieza_bd = datetime.now()
+    if eliminadas_calles + eliminadas_paraderos > 0:
+        st.toast(f"🧹 Se eliminaron {eliminadas_calles + eliminadas_paraderos} alerta(s) expirada(s) de la base de datos.", icon="🗑️")
+
 df_calles = obtener_calles()
 df_paraderos = obtener_paraderos()
 
-calles_inundadas = (
+# --- Filtrado por tiempo: todas las inundadas de la BD ---
+calles_inundadas_bd = (
     df_calles[df_calles["Estado_clean"] == "inundado"]
     if not df_calles.empty else pd.DataFrame()
 )
+
+# --- Filtrado para el MAPA: solo las que tienen menos de MINUTOS_OCULTAR_MAPA minutos ---
+def filtrar_por_tiempo_mapa(df):
+    """Filtra filas cuyo reporte tenga menos de MINUTOS_OCULTAR_MAPA minutos."""
+    if df.empty:
+        return df
+    mask = df["Hora"].apply(lambda h: not debe_ocultar_en_mapa(h))
+    return df[mask]
+
+calles_inundadas = filtrar_por_tiempo_mapa(calles_inundadas_bd) if not calles_inundadas_bd.empty else pd.DataFrame()
+
+# Calcular cuántas están ocultas del mapa pero aún en BD (para info al usuario)
+n_ocultas_mapa = len(calles_inundadas_bd) - len(calles_inundadas) if not calles_inundadas_bd.empty else 0
+
 paraderos_activos = df_paraderos if not df_paraderos.empty else pd.DataFrame()
 paraderos_inundados = (
     paraderos_activos[paraderos_activos["Estado_clean"].isin(["paradero inundado"])]
@@ -744,9 +856,11 @@ if click_a_procesar:
 # =====================================================================
 
 st.write("---")
+
+# Usamos calles_inundadas_bd (todas) para el panel, pero calles_inundadas (filtradas) para el mapa
 lista_emergencias = []
-if not calles_inundadas.empty:
-    lista_emergencias.append(calles_inundadas)
+if not calles_inundadas_bd.empty:
+    lista_emergencias.append(calles_inundadas_bd)
 if not paraderos_activos.empty:
     paraderos_con_problemas = paraderos_activos[
         paraderos_activos["Estado_clean"].isin(["paradero inundado", "paradero mal estado"])
@@ -761,6 +875,17 @@ emergencias_activas = (
 
 cantidad_alertas = len(emergencias_activas) if not emergencias_activas.empty else 0
 st.markdown(f"### 📊 Emergencias Activas ({cantidad_alertas})")
+
+# Aviso de alertas ocultas del mapa
+if n_ocultas_mapa > 0:
+    st.markdown(f"""
+    <div style="background:#1a2a1a;border:1px solid #2d5a2d;border-left:4px solid #4caf50;
+         padding:10px 14px;border-radius:8px;margin-bottom:10px;font-size:0.88em;">
+        👁️ <strong>{n_ocultas_mapa} alerta(s)</strong> no se muestran en el mapa
+        (reportadas hace más de {MINUTOS_OCULTAR_MAPA} minutos), pero siguen
+        registradas. Se eliminarán automáticamente a las {HORAS_ELIMINAR_BD}h del reporte.
+    </div>
+    """, unsafe_allow_html=True)
 
 if emergencias_activas.empty:
     st.info("✅ La ciudad no registra emergencias actualmente. Las rutas están libres.")
@@ -785,12 +910,36 @@ else:
                     afecta_ruta = " &nbsp;<span style='background:#8b1a1a;color:#ffaaaa;padding:1px 7px;border-radius:8px;font-size:0.8em;'>AFECTA TU RUTA</span>"
                     break
 
+        # Calcular tiempo restante para eliminar de BD y estado en mapa
+        minutos_transcurridos = minutos_desde_reporte(alerta.get('Hora', ''))
+        oculta_mapa = debe_ocultar_en_mapa(alerta.get('Hora', ''))
+        if minutos_transcurridos is not None:
+            horas_restantes_bd = max(0, HORAS_ELIMINAR_BD - minutos_transcurridos / 60)
+            if horas_restantes_bd < 1:
+                tiempo_bd_str = f"{int(horas_restantes_bd * 60)}min"
+            else:
+                tiempo_bd_str = f"{horas_restantes_bd:.1f}h"
+            badge_mapa = (
+                "<span style='background:#555;color:#aaa;padding:1px 6px;border-radius:6px;"
+                "font-size:0.75em;margin-left:6px;'>🗺️ oculta del mapa</span>"
+                if oculta_mapa else
+                f"<span style='background:#1a3a1a;color:#88ff88;padding:1px 6px;border-radius:6px;"
+                f"font-size:0.75em;margin-left:6px;'>🗺️ visible {int(max(0, MINUTOS_OCULTAR_MAPA - minutos_transcurridos))}min</span>"
+            )
+            tiempo_bd_badge = f"<span style='font-size:0.75em;color:#888 !important;'>🗑️ BD: -{tiempo_bd_str}</span>"
+        else:
+            badge_mapa = ""
+            tiempo_bd_badge = ""
+
         st.markdown(f"""
         <div class="{clase_css}">
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <strong>{icono} {alerta.get('Lugar', 'Punto Registrado')}{afecta_ruta}</strong>
                 <span style="font-size:0.85em;color:#aaaaaa !important;font-weight:bold;
                       background-color:#333;padding:2px 8px;border-radius:5px;">🕒 {hora_display}</span>
+            </div>
+            <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;">
+                {badge_mapa} {tiempo_bd_badge}
             </div>
             <div style="margin-top:5px;">
                 <span style="font-size:0.85em;color:#ffcccc !important;">{alerta.get('Descripcion', '')}</span><br>
