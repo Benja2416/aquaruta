@@ -11,7 +11,7 @@ import json
 import math
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="🗺️ Alerta Austral 📍", page_icon="🗺️", layout="centered")
+st.set_page_config(page_title="AqueRuta", page_icon="💧", layout="centered")
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1eUVLkgfuO1yBqECtXsxYbOf0YYBnGhFykljGokZVK4U/edit"
 
@@ -355,7 +355,7 @@ def calcular_mejor_ruta(origen, destino, zonas_bloqueadas):
 # MODALS
 # =====================================================================
 
-@st.dialog("🚨 Registrar Nueva Calle Inundada")
+@st.dialog("Registrar Calle Inundada")
 def modal_nueva_alerta(lat, lon):
     with st.spinner("Localizando nombre de la vía..."):
         try:
@@ -368,7 +368,7 @@ def modal_nueva_alerta(lat, lon):
             )
         except Exception:
             calle_detectada = "Punto Registrado"
-    st.info("📍 Coordenadas capturadas correctamente.")
+    st.info("Coordenadas capturadas correctamente.")
     calle_final = st.text_input("Confirmar nombre de la calle:", value=calle_detectada)
     descripcion_incidente = st.text_input("Detalle del incidente:", value="Agua acumulada en calzada")
     col1, col2 = st.columns(2)
@@ -378,7 +378,7 @@ def modal_nueva_alerta(lat, lon):
             st.session_state.ultimo_objeto_clickeado = None
             st.rerun()
     with col2:
-        if st.button("🚨 Guardar Alerta", type="primary", use_container_width=True):
+        if st.button("Guardar Alerta", type="primary", use_container_width=True):
             hora_reporte = datetime.now().strftime("%H:%M (%d/%m)")
             nueva_fila = [calle_final, str(lat), str(lon), descripcion_incidente, "Inundado", hora_reporte]
             try:
@@ -389,7 +389,7 @@ def modal_nueva_alerta(lat, lon):
                 if st.session_state.origen and st.session_state.destino:
                     st.session_state.ruta_geojson = None
                     st.session_state.ruta_info = None
-                st.success("¡Alerta registrada! La ruta se recalculará automáticamente.")
+                st.success("Alerta registrada. La ruta se recalculará automáticamente.")
                 st.session_state.ultimo_click_procesado = None
                 st.session_state.ultimo_objeto_clickeado = None
                 st.rerun()
@@ -398,7 +398,7 @@ def modal_nueva_alerta(lat, lon):
 
 @st.dialog("🔄 Gestionar Calle Inundada")
 def modal_eliminar_alerta(alerta):
-    st.info(f"📍 **Calle:** {alerta.get('Lugar')}\n\n🕒 **Reportado a las:** {alerta.get('Hora', 'Sin Registro')}\n\n📝 **Detalle:** {alerta.get('Descripcion')}")
+    st.info(f"Calle: {alerta.get('Lugar')}\n\nReportado a las: {alerta.get('Hora', 'Sin Registro')}\n\nDetalle: {alerta.get('Descripcion')}")
     st.markdown("<p style='text-align:center;font-weight:bold;'>¿El tránsito volvió a la normalidad?</p>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
@@ -412,7 +412,7 @@ def modal_eliminar_alerta(alerta):
 
 @st.dialog("🚏 Gestionar Paradero")
 def modal_gestionar_paradero(paradero):
-    st.info(f"📍 **Paradero:** {paradero.get('Lugar')}\n\n📝 **Detalle:** {paradero.get('Descripcion')}")
+    st.info(f"Paradero: {paradero.get('Lugar')}\n\nDetalle: {paradero.get('Descripcion')}")
     estado_limpio = paradero.get("Estado_clean")
     if estado_limpio == "paradero normal":
         st.markdown("<p style='text-align:center;font-weight:bold;'>¿Qué problema presenta este paradero?</p>", unsafe_allow_html=True)
@@ -432,10 +432,10 @@ def modal_gestionar_paradero(paradero):
         st.session_state.ultimo_objeto_clickeado = None
         st.rerun()
 
-@st.dialog("📍 Seleccionar Punto de Ruta")
+@st.dialog("Seleccionar Punto de Ruta")
 def modal_seleccion_ruta(lat, lon):
     paso = st.session_state.paso_seleccion
-    titulo = "🟢 Confirmar como ORIGEN" if paso == "origen" else "🔴 Confirmar como DESTINO"
+    titulo = "Confirmar como ORIGEN" if paso == "origen" else "Confirmar como DESTINO"
     with st.spinner("Obteniendo nombre del lugar..."):
         try:
             geolocator = Nominatim(user_agent="alerta_austral_ruta_bot")
@@ -463,14 +463,14 @@ def modal_seleccion_ruta(lat, lon):
                 st.session_state.paso_seleccion = "destino"
                 st.session_state.ruta_geojson = None
                 st.session_state.ruta_info = None
-                st.toast("✅ Origen establecido. Ahora toca el destino en el mapa.", icon="🟢")
+                st.toast("Origen establecido. Ahora toca el destino en el mapa.")
             else:
                 st.session_state.destino = (lat, lon)
                 st.session_state.destino_nombre = nombre
                 st.session_state.paso_seleccion = "origen"
                 st.session_state.ruta_geojson = None
                 st.session_state.ruta_info = None
-                st.toast("✅ Destino establecido. Calculando ruta...", icon="🔴")
+                st.toast("Destino establecido. Calculando ruta...")
             st.session_state.ultimo_click_procesado = None
             st.session_state.ultimo_objeto_clickeado = None
             st.rerun()
@@ -495,7 +495,7 @@ div[data-testid="stDialog"] div[role="dialog"] { background-color: #222 !importa
 .alt-badge { display: inline-block; background: #dc2626; color: white !important; padding: 2px 10px; border-radius: 12px; font-size: 0.8em; font-weight: bold; margin-left: 8px; }
 .stButton button { border-radius: 8px !important; }
 </style>
-<div class="main-header">🚨 Alerta Austral 📱</div>
+<div class="main-header">AqueRuta</div>
 ''', unsafe_allow_html=True)
 
 # =====================================================================
@@ -514,7 +514,7 @@ if minutos_desde_limpieza >= 5:
     eliminadas_paraderos = limpiar_alertas_expiradas_sheet("Hoja 2")
     st.session_state.ultima_limpieza_bd = datetime.now()
     if eliminadas_calles + eliminadas_paraderos > 0:
-        st.toast(f"🧹 Se eliminaron {eliminadas_calles + eliminadas_paraderos} alerta(s) expirada(s) de la base de datos.", icon="🗑️")
+        st.toast(f"Se eliminaron {eliminadas_calles + eliminadas_paraderos} alerta(s) expirada(s) de la base de datos.")
 
 df_calles = obtener_calles()
 df_paraderos = obtener_paraderos()
@@ -535,8 +535,6 @@ def filtrar_por_tiempo_mapa(df):
 
 calles_inundadas = filtrar_por_tiempo_mapa(calles_inundadas_bd) if not calles_inundadas_bd.empty else pd.DataFrame()
 
-# Calcular cuántas están ocultas del mapa pero aún en BD (para info al usuario)
-n_ocultas_mapa = len(calles_inundadas_bd) - len(calles_inundadas) if not calles_inundadas_bd.empty else 0
 
 paraderos_activos = df_paraderos if not df_paraderos.empty else pd.DataFrame()
 paraderos_inundados = (
@@ -548,7 +546,7 @@ paraderos_inundados = (
 # PANEL DE CONTROL DE RUTA
 # =====================================================================
 
-st.markdown("### 🗺️ Planificador de Rutas")
+st.markdown("### Planificador de Rutas")
 
 col_modo, col_limpiar = st.columns([3, 1])
 with col_modo:
@@ -583,18 +581,18 @@ if st.session_state.modo_ruta:
     destino_nombre = getattr(st.session_state, 'destino_nombre', None)
 
     if not st.session_state.origen:
-        st.info("🟢 **Paso 1:** Toca el mapa para marcar tu **ORIGEN**")
+        st.info("Paso 1: Toca el mapa para marcar tu ORIGEN")
     elif not st.session_state.destino:
-        st.success(f"✅ Origen: **{origen_nombre or 'Seleccionado'}**")
-        st.info("🔴 **Paso 2:** Toca el mapa para marcar tu **DESTINO**")
+        st.success(f"Origen: {origen_nombre or 'Seleccionado'}")
+        st.info("Paso 2: Toca el mapa para marcar tu DESTINO")
     else:
         c1, c2 = st.columns(2)
         with c1:
-            st.success(f"🟢 {origen_nombre or 'Origen'}")
+            st.success(f"{origen_nombre or 'Origen'}")
         with c2:
-            st.error(f"🔴 {destino_nombre or 'Destino'}")
+            st.error(f"{destino_nombre or 'Destino'}")
 else:
-    st.caption("📱 *Toca una calle para reportar, o toca un Paradero (🚏) para administrarlo.*")
+    st.caption("Toca una calle para reportar una inundación, o toca un paradero para administrarlo.")
 
 # =====================================================================
 # CÁLCULO DE RUTA (cuando hay origen y destino)
@@ -772,7 +770,7 @@ if not paraderos_activos.empty:
             folium.Marker(
                 location=[lat, lon],
                 icon=folium.Icon(color="red", icon="bus", prefix="fa"),
-                tooltip="🚨 Paradero Inundado"
+                tooltip="Paradero Inundado"
             ).add_to(mapa)
         elif estado_p == "paradero mal estado":
             folium.Marker(
@@ -874,21 +872,10 @@ emergencias_activas = (
 )
 
 cantidad_alertas = len(emergencias_activas) if not emergencias_activas.empty else 0
-st.markdown(f"### 📊 Emergencias Activas ({cantidad_alertas})")
-
-# Aviso de alertas ocultas del mapa
-if n_ocultas_mapa > 0:
-    st.markdown(f"""
-    <div style="background:#1a2a1a;border:1px solid #2d5a2d;border-left:4px solid #4caf50;
-         padding:10px 14px;border-radius:8px;margin-bottom:10px;font-size:0.88em;">
-        👁️ <strong>{n_ocultas_mapa} alerta(s)</strong> no se muestran en el mapa
-        (reportadas hace más de {MINUTOS_OCULTAR_MAPA} minutos), pero siguen
-        registradas. Se eliminarán automáticamente a las {HORAS_ELIMINAR_BD}h del reporte.
-    </div>
-    """, unsafe_allow_html=True)
+st.markdown(f"### Emergencias Activas ({cantidad_alertas})")
 
 if emergencias_activas.empty:
-    st.info("✅ La ciudad no registra emergencias actualmente. Las rutas están libres.")
+    st.info("La ciudad no registra emergencias actualmente. Las rutas están libres.")
 else:
     for _, alerta in emergencias_activas.iterrows():
         hora_display = (
@@ -910,36 +897,12 @@ else:
                     afecta_ruta = " &nbsp;<span style='background:#8b1a1a;color:#ffaaaa;padding:1px 7px;border-radius:8px;font-size:0.8em;'>AFECTA TU RUTA</span>"
                     break
 
-        # Calcular tiempo restante para eliminar de BD y estado en mapa
-        minutos_transcurridos = minutos_desde_reporte(alerta.get('Hora', ''))
-        oculta_mapa = debe_ocultar_en_mapa(alerta.get('Hora', ''))
-        if minutos_transcurridos is not None:
-            horas_restantes_bd = max(0, HORAS_ELIMINAR_BD - minutos_transcurridos / 60)
-            if horas_restantes_bd < 1:
-                tiempo_bd_str = f"{int(horas_restantes_bd * 60)}min"
-            else:
-                tiempo_bd_str = f"{horas_restantes_bd:.1f}h"
-            badge_mapa = (
-                "<span style='background:#555;color:#aaa;padding:1px 6px;border-radius:6px;"
-                "font-size:0.75em;margin-left:6px;'>🗺️ oculta del mapa</span>"
-                if oculta_mapa else
-                f"<span style='background:#1a3a1a;color:#88ff88;padding:1px 6px;border-radius:6px;"
-                f"font-size:0.75em;margin-left:6px;'>🗺️ visible {int(max(0, MINUTOS_OCULTAR_MAPA - minutos_transcurridos))}min</span>"
-            )
-            tiempo_bd_badge = f"<span style='font-size:0.75em;color:#888 !important;'>🗑️ BD: -{tiempo_bd_str}</span>"
-        else:
-            badge_mapa = ""
-            tiempo_bd_badge = ""
-
         st.markdown(f"""
         <div class="{clase_css}">
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <strong>{icono} {alerta.get('Lugar', 'Punto Registrado')}{afecta_ruta}</strong>
                 <span style="font-size:0.85em;color:#aaaaaa !important;font-weight:bold;
-                      background-color:#333;padding:2px 8px;border-radius:5px;">🕒 {hora_display}</span>
-            </div>
-            <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;">
-                {badge_mapa} {tiempo_bd_badge}
+                      background-color:#333;padding:2px 8px;border-radius:5px;">{hora_display}</span>
             </div>
             <div style="margin-top:5px;">
                 <span style="font-size:0.85em;color:#ffcccc !important;">{alerta.get('Descripcion', '')}</span><br>
@@ -954,7 +917,7 @@ else:
 st.markdown("""
 <div style="text-align:center;margin-top:20px;padding:10px;
      border-top:1px solid #333;font-size:0.8em;color:#666 !important;">
-    🔄 Las rutas se recalculan automáticamente cuando se registra una nueva inundación.<br>
+    Las rutas se recalculan automáticamente cuando se registra una nueva inundación.<br>
     Enrutamiento vía <strong>OSRM</strong> (Open Source Routing Machine)
 </div>
 """, unsafe_allow_html=True)
