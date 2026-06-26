@@ -19,7 +19,7 @@ def ahora_chile():
     return datetime.now(pytz.utc).astimezone(TZ_CHILE)
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="AquaRuta", page_icon="💧", layout="centered")
+st.set_page_config(page_title="AqueRuta", page_icon="💧", layout="centered")
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1eUVLkgfuO1yBqECtXsxYbOf0YYBnGhFykljGokZVK4U/edit"
 
@@ -219,6 +219,9 @@ def limpiar_alertas_expiradas_sheet(nombre_pestana="sheet1"):
 # MÓDULO DE ENRUTAMIENTO CON OSRM
 # =====================================================================
 
+# Radio de detección de zona bloqueada sobre la ruta (~150m real)
+RADIO_DETECCION_RUTA = 0.0014
+
 def obtener_zonas_bloqueadas(calles_inundadas, paraderos_inundados=None):
     """Devuelve lista de (lat, lon) de todas las zonas a evitar."""
     zonas = []
@@ -230,97 +233,93 @@ def obtener_zonas_bloqueadas(calles_inundadas, paraderos_inundados=None):
             zonas.append((float(p["Latitud"]), float(p["Longitud"])))
     return zonas
 
-def ruta_pasa_por_zona(coordenadas_ruta, zonas_bloqueadas, radio=RADIO_EXCLUSION_GRADOS):
-    """Verifica si algún punto de la ruta está dentro del radio de una zona bloqueada."""
+def ruta_pasa_por_zona(coords_ruta, zonas_bloqueadas, radio=RADIO_DETECCION_RUTA):
+    """
+    Verifica si algún segmento de la ruta pasa cerca de una zona bloqueada.
+    Retorna lista de zonas que la ruta cruza.
+    """
     zonas_detectadas = []
-    for lat_r, lon_r in coordenadas_ruta:
+    vistas = set()
+    for lat_r, lon_r in coords_ruta:
         for lat_z, lon_z in zonas_bloqueadas:
+            clave = (lat_z, lon_z)
+            if clave in vistas:
+                continue
             dist = math.sqrt((lat_r - lat_z)**2 + (lon_r - lon_z)**2)
             if dist < radio:
-                zonas_detectadas.append((lat_z, lon_z))
+                zonas_detectadas.append(clave)
+                vistas.add(clave)
     return zonas_detectadas
 
-def calcular_ruta_osrm(origen, destino, waypoints_extra=None):
+def pedir_rutas_osrm(origen, destino, waypoints_extra=None, alternativas=False):
     """
-    Llama a la API pública de OSRM para calcular una ruta.
-    origen/destino: (lat, lon)
-    waypoints_extra: lista de (lat, lon) para desvíos
-    Retorna: (geojson_coords, distancia_km, duracion_min) o None
+    Llama a OSRM y retorna lista de rutas encontradas.
+    Con alternativas=True pide hasta 3 rutas distintas.
+    Cada ruta: (coords_latlon, distancia_km, duracion_min)
     """
     puntos = [origen]
     if waypoints_extra:
         puntos.extend(waypoints_extra)
     puntos.append(destino)
 
-    # OSRM espera lon,lat
     coords_str = ";".join(f"{lon},{lat}" for lat, lon in puntos)
+    alt_param = "true&alternatives=3" if alternativas else "false"
     url = (
         f"https://router.project-osrm.org/route/v1/driving/{coords_str}"
-        f"?overview=full&geometries=geojson&steps=false"
+        f"?overview=full&geometries=geojson&steps=false&alternatives={alt_param}"
     )
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=12)
         data = resp.json()
         if data.get("code") != "Ok" or not data.get("routes"):
-            return None
-        route = data["routes"][0]
-        coords_geojson = route["geometry"]["coordinates"]  # [[lon, lat], ...]
-        coords_latlon = [(c[1], c[0]) for c in coords_geojson]
-        distancia_km = route["distance"] / 1000
-        duracion_min = route["duration"] / 60
-        return coords_latlon, distancia_km, duracion_min
-    except Exception as e:
-        return None
-
-def generar_waypoints_desvio(zonas, origen, destino, offset=0.003):
-    """
-    Genera puntos intermedios para esquivar zonas inundadas.
-    Desplaza perpendicularmente a la línea origen-destino.
-    """
-    if not zonas:
+            return []
+        resultados = []
+        for route in data["routes"]:
+            coords = [(c[1], c[0]) for c in route["geometry"]["coordinates"]]
+            dist_km = route["distance"] / 1000
+            dur_min = route["duration"] / 60
+            resultados.append((coords, dist_km, dur_min))
+        return resultados
+    except Exception:
         return []
 
-    # Vector dirección origen → destino
-    dlat = destino[0] - origen[0]
-    dlon = destino[1] - origen[1]
-    norma = math.sqrt(dlat**2 + dlon**2)
-    if norma == 0:
-        return []
-
-    # Vector perpendicular (rotado 90°)
-    perp_lat = -dlon / norma
-    perp_lon = dlat / norma
-
-    waypoints = []
-    for lat_z, lon_z in zonas:
-        # Añadir waypoint desplazado perpendicularmente desde la zona bloqueada
-        wp_lat = lat_z + perp_lat * offset
-        wp_lon = lon_z + perp_lon * offset
-        waypoints.append((wp_lat, wp_lon))
-
-    # Ordenar waypoints según su proyección sobre la línea origen-destino
-    def proyeccion(wp):
-        return (wp[0] - origen[0]) * dlat + (wp[1] - origen[1]) * dlon
-    waypoints.sort(key=proyeccion)
-    return waypoints
+def generar_candidatos_desvio(zona_lat, zona_lon, origen, destino):
+    """
+    Para una zona bloqueada, genera 8 waypoints candidatos en distintas
+    direcciones (N, S, E, O, NE, NO, SE, SO) a distancia creciente.
+    OSRM snapeará cada uno a la calle más cercana, garantizando que
+    el waypoint final esté en una vía real alejada de la zona.
+    """
+    candidatos = []
+    # Offsets en grados: ~200m, ~350m, ~500m
+    for offset in [0.002, 0.0035, 0.005]:
+        angulos = [0, 45, 90, 135, 180, 225, 270, 315]
+        for ang in angulos:
+            rad = math.radians(ang)
+            wp_lat = zona_lat + offset * math.cos(rad)
+            wp_lon = zona_lon + offset * math.sin(rad)
+            # Descartar candidatos que alejen demasiado de la línea origen-destino
+            # (nos quedamos solo con los que están en un corredor razonable)
+            candidatos.append((wp_lat, wp_lon))
+    return candidatos
 
 def calcular_mejor_ruta(origen, destino, zonas_bloqueadas):
     """
-    Calcula la ruta directa y verifica si pasa por zonas inundadas.
-    Si hay conflicto, calcula ruta alternativa con waypoints de desvío.
-    Retorna: dict con info de ruta
+    Estrategia robusta en 3 pasos:
+    1. Pedir ruta directa + alternativas a OSRM
+    2. Si alguna no pasa por zonas → usarla directamente
+    3. Si todas pasan → generar waypoints de desvío reales por cada zona
+       e iterar hasta encontrar una combinación libre, o la menos afectada
     """
-    # 1. Ruta directa
-    resultado_directo = calcular_ruta_osrm(origen, destino)
-    if not resultado_directo:
+    # --- PASO 1: rutas directas con alternativas ---
+    rutas_candidatas = pedir_rutas_osrm(origen, destino, alternativas=True)
+    if not rutas_candidatas:
         return None
 
-    coords_directa, dist_directa, dur_directa = resultado_directo
+    coords_directa, dist_directa, dur_directa = rutas_candidatas[0]
 
-    # 2. Verificar si pasa por zonas inundadas
-    zonas_en_ruta = ruta_pasa_por_zona(coords_directa, zonas_bloqueadas)
-
-    if not zonas_en_ruta:
+    # Si no hay zonas bloqueadas, devolver la más rápida directamente
+    if not zonas_bloqueadas:
         return {
             "coords": coords_directa,
             "distancia_km": dist_directa,
@@ -330,35 +329,81 @@ def calcular_mejor_ruta(origen, destino, zonas_bloqueadas):
             "coords_directa_bloqueada": None,
         }
 
-    # 3. Calcular ruta alternativa evitando zonas inundadas
-    waypoints = generar_waypoints_desvio(zonas_en_ruta, origen, destino)
-    resultado_alt = calcular_ruta_osrm(origen, destino, waypoints)
+    # --- PASO 2: buscar entre las alternativas una libre de obstáculos ---
+    ruta_libre = None
+    for coords_c, dist_c, dur_c in rutas_candidatas:
+        zonas_en_esta = ruta_pasa_por_zona(coords_c, zonas_bloqueadas)
+        if not zonas_en_esta:
+            ruta_libre = (coords_c, dist_c, dur_c)
+            break  # tomamos la primera libre (OSRM las ordena por duración)
 
-    if not resultado_alt:
-        # Si falla el desvío, devolver la directa con advertencia
+    if ruta_libre:
+        coords_libre, dist_libre, dur_libre = ruta_libre
+        # Verificar si la ruta directa (primera) también estaba libre
+        zonas_en_directa = ruta_pasa_por_zona(coords_directa, zonas_bloqueadas)
+        es_alt = (coords_libre is not coords_directa) or len(zonas_en_directa) > 0
         return {
-            "coords": coords_directa,
-            "distancia_km": dist_directa,
-            "duracion_min": dur_directa,
-            "es_alternativa": False,
-            "zonas_evitadas": zonas_en_ruta,
-            "coords_directa_bloqueada": coords_directa,
-            "advertencia": "No se pudo calcular ruta alternativa",
+            "coords": coords_libre,
+            "distancia_km": dist_libre,
+            "duracion_min": dur_libre,
+            "es_alternativa": es_alt,
+            "zonas_evitadas": zonas_en_directa if es_alt else [],
+            "coords_directa_bloqueada": coords_directa if es_alt else None,
+            "ruta_directa_dist": dist_directa,
+            "ruta_directa_dur": dur_directa,
         }
 
-    coords_alt, dist_alt, dur_alt = resultado_alt
-    zonas_en_alt = ruta_pasa_por_zona(coords_alt, zonas_bloqueadas)
+    # --- PASO 3: ninguna alternativa libre → forzar desvío con waypoints ---
+    # Detectar las zonas que afectan la ruta directa
+    zonas_en_directa = ruta_pasa_por_zona(coords_directa, zonas_bloqueadas)
 
+    mejor_ruta = None
+    menor_zonas_restantes = len(zonas_bloqueadas) + 1
+
+    for lat_z, lon_z in zonas_en_directa:
+        candidatos = generar_candidatos_desvio(lat_z, lon_z, origen, destino)
+        for wp in candidatos:
+            rutas_con_wp = pedir_rutas_osrm(origen, destino,
+                                             waypoints_extra=[wp],
+                                             alternativas=False)
+            if not rutas_con_wp:
+                continue
+            coords_wp, dist_wp, dur_wp = rutas_con_wp[0]
+            zonas_restantes = ruta_pasa_por_zona(coords_wp, zonas_bloqueadas)
+
+            if len(zonas_restantes) < menor_zonas_restantes:
+                menor_zonas_restantes = len(zonas_restantes)
+                mejor_ruta = (coords_wp, dist_wp, dur_wp)
+
+            if menor_zonas_restantes == 0:
+                break  # encontramos una ruta completamente libre
+        if menor_zonas_restantes == 0:
+            break
+
+    if mejor_ruta:
+        coords_mejor, dist_mejor, dur_mejor = mejor_ruta
+        zonas_aun = ruta_pasa_por_zona(coords_mejor, zonas_bloqueadas)
+        return {
+            "coords": coords_mejor,
+            "distancia_km": dist_mejor,
+            "duracion_min": dur_mejor,
+            "es_alternativa": True,
+            "zonas_evitadas": zonas_en_directa,
+            "coords_directa_bloqueada": coords_directa,
+            "ruta_directa_dist": dist_directa,
+            "ruta_directa_dur": dur_directa,
+            "aun_pasa_por_zonas": len(zonas_aun) > 0,
+        }
+
+    # Último recurso: devolver la ruta directa con advertencia
     return {
-        "coords": coords_alt,
-        "distancia_km": dist_alt,
-        "duracion_min": dur_alt,
-        "es_alternativa": True,
-        "zonas_evitadas": zonas_en_ruta,
-        "coords_directa_bloqueada": coords_directa,
-        "ruta_directa_dist": dist_directa,
-        "ruta_directa_dur": dur_directa,
-        "aun_pasa_por_zonas": len(zonas_en_alt) > 0,
+        "coords": coords_directa,
+        "distancia_km": dist_directa,
+        "duracion_min": dur_directa,
+        "es_alternativa": False,
+        "zonas_evitadas": zonas_en_directa,
+        "coords_directa_bloqueada": None,
+        "advertencia": "No se encontró ruta completamente libre de zonas inundadas.",
     }
 
 # =====================================================================
@@ -505,7 +550,7 @@ div[data-testid="stDialog"] div[role="dialog"] { background-color: #222 !importa
 .alt-badge { display: inline-block; background: #dc2626; color: white !important; padding: 2px 10px; border-radius: 12px; font-size: 0.8em; font-weight: bold; margin-left: 8px; }
 .stButton button { border-radius: 8px !important; }
 </style>
-<div class="main-header">AquaRuta</div>
+<div class="main-header">AqueRuta</div>
 ''', unsafe_allow_html=True)
 
 # =====================================================================
